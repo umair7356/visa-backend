@@ -60,7 +60,7 @@ router.post('/check-status', [
 router.get('/:id/document', async (req, res) => {
   try {
     console.log('Document download requested for ID:', req.params.id);
-    
+
     const application = await Application.findById(req.params.id);
     if (!application) {
       console.log('Application not found');
@@ -77,19 +77,19 @@ router.get('/:id/document', async (req, res) => {
     // Security: Verify application details if provided (optional)
     if (req.query.applicationId || req.query.passportNumber || req.query.dob || req.query.nationality) {
       const { applicationId, passportNumber, dob, nationality } = req.query;
-      
+
       if (applicationId && application.applicationId !== applicationId) {
         return res.status(403).json({ error: 'Invalid application details' });
       }
-      
+
       if (passportNumber && application.passportNumber !== passportNumber) {
         return res.status(403).json({ error: 'Invalid application details' });
       }
-      
+
       if (nationality && application.nationality !== nationality) {
         return res.status(403).json({ error: 'Invalid application details' });
       }
-      
+
       if (dob) {
         const dobDate = new Date(dob);
         const appDob = new Date(application.dob);
@@ -101,9 +101,9 @@ router.get('/:id/document', async (req, res) => {
 
     // Get document URL - prioritize documentFilePath (which has Cloudinary URL)
     let documentUrl = application.documentFilePath || application.documentUrl;
-    
+
     console.log('Document URL:', documentUrl);
-    
+
     if (!documentUrl) {
       return res.status(404).json({ error: 'Document not found' });
     }
@@ -111,17 +111,17 @@ router.get('/:id/document', async (req, res) => {
     // If it's a Cloudinary URL, fetch and stream to client
     if (documentUrl.startsWith('http://') || documentUrl.startsWith('https://')) {
       console.log('Fetching from Cloudinary:', documentUrl);
-      
+
       try {
         const https = require('https');
         const http = require('http');
-        
+
         const client = documentUrl.startsWith('https://') ? https : http;
-        
+
         // Fetch file from Cloudinary
         const fileRequest = client.get(documentUrl, (fileResponse) => {
           console.log('Cloudinary response status:', fileResponse.statusCode);
-          
+
           // Handle redirects
           if (fileResponse.statusCode === 301 || fileResponse.statusCode === 302) {
             const redirectUrl = fileResponse.headers.location;
@@ -130,14 +130,14 @@ router.get('/:id/document', async (req, res) => {
               return res.redirect(redirectUrl);
             }
           }
-          
+
           // Handle successful response
           if (fileResponse.statusCode === 200) {
             // Set appropriate headers
             const contentType = fileResponse.headers['content-type'] || 'application/pdf';
             res.setHeader('Content-Type', contentType);
             res.setHeader('Content-Disposition', `attachment; filename="visa-document-${application.applicationId}.pdf"`);
-            
+
             console.log('Streaming file to client');
             // Stream the file to the client
             fileResponse.pipe(res);
@@ -146,12 +146,12 @@ router.get('/:id/document', async (req, res) => {
             return res.status(fileResponse.statusCode).json({ error: 'Failed to fetch document from Cloudinary' });
           }
         });
-        
+
         fileRequest.on('error', (error) => {
           console.error('Error fetching from Cloudinary:', error);
           return res.status(500).json({ error: 'Failed to fetch document' });
         });
-        
+
         fileRequest.end();
       } catch (error) {
         console.error('Error processing Cloudinary URL:', error);
