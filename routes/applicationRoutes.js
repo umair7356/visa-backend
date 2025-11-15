@@ -157,6 +157,8 @@ router.post('/check-status', [
 // router.use(authMiddleware);
 
 // Public route - Download document
+const axios = require('axios');
+
 router.get('/:id/document', async (req, res) => {
   try {
     const application = await Application.findById(req.params.id);
@@ -164,23 +166,21 @@ router.get('/:id/document', async (req, res) => {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    // If you want, keep optional security query params validation
-    const { applicationId, passportNumber, dob, nationality } = req.query;
-    if (
-      (applicationId && application.applicationId !== applicationId) ||
-      (passportNumber && application.passportNumber !== passportNumber) ||
-      (nationality && application.nationality !== nationality) ||
-      (dob && new Date(dob).toDateString() !== new Date(application.dob).toDateString())
-    ) {
-      return res.status(403).json({ error: 'Invalid application details' });
-    }
+    const documentUrl = application.documentFilePath; // Cloudinary URL
 
-    // Redirect directly to Cloudinary URL
-    return res.redirect(application.documentFilePath);
+    // Fetch the file from Cloudinary
+    const response = await axios.get(documentUrl, { responseType: 'stream' });
+
+    // Set headers for download
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="visa-document-${application.applicationId}.pdf"`);
+
+    // Pipe the PDF stream to client
+    response.data.pipe(res);
 
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Failed to fetch document' });
+    console.error('Download error:', err);
+    res.status(500).json({ error: 'Failed to fetch document' });
   }
 });
 
