@@ -24,22 +24,22 @@ if (hasCloudinaryConfig) {
 
   // Configure multer storage with Cloudinary
   storage = new CloudinaryStorage({
-    cloudinary: cloudinary,
-    params: async (req, file) => {
-      let resource_type = 'raw'; // default to raw for documents
-      const allowedFormats = ['pdf', 'doc', 'docx'];
+  cloudinary: cloudinary,
+  params: async (req, file) => {
+    let resource_type = 'raw'; // default to raw for documents
+    const allowedFormats = ['pdf', 'doc', 'docx'];
 
-      if (!allowedFormats.includes(file.mimetype.split('/')[1])) {
-        throw new Error('Only PDF and DOC files are allowed');
-      }
+    if (!allowedFormats.includes(file.mimetype.split('/')[1])) {
+      throw new Error('Only PDF and DOC files are allowed');
+    }
 
-      return {
-        folder: 'visa-applications',
-        resource_type: 'raw', // <-- important for PDFs/DOCs
-        format: file.originalname.split('.').pop(), // preserve extension
-      };
-    },
-  });
+    return {
+      folder: 'visa-applications',
+      resource_type: 'raw', // <-- important for PDFs/DOCs
+      format: file.originalname.split('.').pop(), // preserve extension
+    };
+  },
+});
 
 } else {
   // Fallback to local disk storage
