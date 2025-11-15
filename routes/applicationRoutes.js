@@ -6,6 +6,7 @@ const authMiddleware = require('../middleware/auth');
 const { body, validationResult } = require('express-validator');
 const fs = require('fs');
 const path = require('path');
+const multer = require('multer');
 
 // Conditionally require cloudinary only if credentials are available
 let cloudinary = null;
@@ -132,9 +133,11 @@ router.post('/with-document', upload.single('document'), [
       if (req.file.secure_url || req.file.url) {
         // Cloudinary file
         applicationData.documentUrl = req.file.secure_url || req.file.url;
+        console.log('✓ File uploaded to Cloudinary:', applicationData.documentUrl);
       } else {
         // Local file - store path in documentFilePath for backward compatibility
         applicationData.documentFilePath = req.file.path;
+        console.log('✓ File saved locally:', applicationData.documentFilePath);
       }
     }
 
@@ -143,11 +146,41 @@ router.post('/with-document', upload.single('document'), [
 
     res.status(201).json(application);
   } catch (error) {
+    // If file was uploaded but application creation failed, clean up the file
+    if (req.file) {
+      try {
+        if (req.file.secure_url || req.file.url) {
+          // Cloudinary file - would need to delete from Cloudinary
+          // This is handled in error cases if needed
+        } else if (req.file.path && fs.existsSync(req.file.path)) {
+          // Local file - delete it
+          fs.unlinkSync(req.file.path);
+        }
+      } catch (cleanupError) {
+        console.error('Error cleaning up uploaded file:', cleanupError);
+      }
+    }
+
     if (error.code === 11000) {
       return res.status(400).json({ error: 'Application ID already exists' });
     }
+    console.error('Error creating application:', error);
     res.status(500).json({ error: error.message });
   }
+});
+
+// Error handler for multer upload errors (must be after the route)
+router.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ error: 'File size too large. Maximum size is 10MB.' });
+    }
+    return res.status(400).json({ error: `Upload error: ${err.message}` });
+  }
+  if (err && err.message && err.message.includes('Only PDF and DOC')) {
+    return res.status(400).json({ error: err.message });
+  }
+  next(err);
 });
 
 // Update application

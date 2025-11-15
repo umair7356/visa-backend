@@ -34,12 +34,13 @@ if (hasCloudinaryConfig) {
   });
 } else {
   // Fallback to local disk storage
-  console.warn('Cloudinary credentials not found. Using local file storage.');
+  console.log('ℹ️  Cloudinary not configured. Files will be stored locally in the uploads folder.');
   
   // Ensure uploads directory exists
   const uploadsDir = path.join(__dirname, '../uploads');
   if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
+    console.log('✓ Created uploads directory:', uploadsDir);
   }
 
   // Configure multer storage for local files
