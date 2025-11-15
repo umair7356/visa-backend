@@ -54,6 +54,64 @@ router.post('/check-status', [
   }
 });
 
+// Public route - Download document (with security validation)
+router.get('/:id/document', async (req, res) => {
+  try {
+    const application = await Application.findById(req.params.id);
+    if (!application) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+
+    // Security: Verify application details if provided (optional for backward compatibility)
+    // If verification params are provided, validate them
+    if (req.query.applicationId || req.query.passportNumber || req.query.dob || req.query.nationality) {
+      const { applicationId, passportNumber, dob, nationality } = req.query;
+      
+      if (applicationId && application.applicationId !== applicationId) {
+        return res.status(403).json({ error: 'Invalid application details' });
+      }
+      
+      if (passportNumber && application.passportNumber !== passportNumber) {
+        return res.status(403).json({ error: 'Invalid application details' });
+      }
+      
+      if (nationality && application.nationality !== nationality) {
+        return res.status(403).json({ error: 'Invalid application details' });
+      }
+      
+      if (dob) {
+        const dobDate = new Date(dob);
+        const appDob = new Date(application.dob);
+        if (dobDate.toDateString() !== appDob.toDateString()) {
+          return res.status(403).json({ error: 'Invalid application details' });
+        }
+      }
+    }
+
+    // Use documentUrl (Cloudinary) if available, otherwise fallback to documentFilePath
+    // documentFilePath might also contain Cloudinary URL (for backward compatibility)
+    let documentUrl = application.documentUrl || application.documentFilePath;
+    
+    if (!documentUrl) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    // If it's a Cloudinary URL (starts with http/https), redirect to it
+    if (documentUrl.startsWith('http://') || documentUrl.startsWith('https://')) {
+      return res.redirect(documentUrl);
+    }
+
+    // Fallback for local files (backward compatibility)
+    if (fs.existsSync(documentUrl)) {
+      return res.download(documentUrl);
+    }
+
+    return res.status(404).json({ error: 'Document not found' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Protected routes - require authentication
 router.use(authMiddleware);
 
@@ -354,37 +412,6 @@ router.delete('/:id', async (req, res) => {
 
     await Application.findByIdAndDelete(req.params.id);
     res.json({ message: 'Application deleted successfully' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Download document
-router.get('/:id/document', async (req, res) => {
-  try {
-    const application = await Application.findById(req.params.id);
-    if (!application) {
-      return res.status(404).json({ error: 'Application not found' });
-    }
-
-    // Use documentUrl (Cloudinary) if available, otherwise fallback to documentFilePath (local)
-    const documentUrl = application.documentUrl || application.documentFilePath;
-    
-    if (!documentUrl) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-
-    // If it's a Cloudinary URL, redirect to it
-    if (documentUrl.startsWith('http://') || documentUrl.startsWith('https://')) {
-      return res.redirect(documentUrl);
-    }
-
-    // Fallback for local files (backward compatibility)
-    if (fs.existsSync(documentUrl)) {
-      return res.download(documentUrl);
-    }
-
-    return res.status(404).json({ error: 'Document not found' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
