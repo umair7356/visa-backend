@@ -25,13 +25,22 @@ if (hasCloudinaryConfig) {
   // Configure multer storage with Cloudinary
   storage = new CloudinaryStorage({
     cloudinary: cloudinary,
-    params: {
-      folder: 'visa-applications',
-      allowed_formats: ['pdf', 'doc', 'docx'],
-      resource_type: 'auto',
-      transformation: [{ quality: 'auto' }]
-    }
+    params: async (req, file) => {
+      let resource_type = 'raw'; // default to raw for documents
+      const allowedFormats = ['pdf', 'doc', 'docx'];
+
+      if (!allowedFormats.includes(file.mimetype.split('/')[1])) {
+        throw new Error('Only PDF and DOC files are allowed');
+      }
+
+      return {
+        folder: 'visa-applications',
+        resource_type: 'raw', // <-- important for PDFs/DOCs
+        format: file.originalname.split('.').pop(), // preserve extension
+      };
+    },
   });
+
 } else {
   // Fallback to local disk storage
   console.log('ℹ️  Cloudinary not configured. Files will be stored locally in the uploads folder.');
