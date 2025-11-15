@@ -36,6 +36,11 @@ const applicationSchema = new mongoose.Schema({
     enum: ['Pending', 'In Process', 'Success', 'Rejected'],
     default: 'Pending'
   },
+  documentUrl: {
+    type: String,
+    default: null
+  },
+  // Keep documentFilePath for backward compatibility (deprecated)
   documentFilePath: {
     type: String,
     default: null

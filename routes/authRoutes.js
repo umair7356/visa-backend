@@ -55,12 +55,14 @@ router.post('/login', [
   body('email').isEmail().withMessage('Please provide a valid email'),
   body('password').notEmpty().withMessage('Password is required')
 ], async (req, res) => {
+  console.log("dasda",req);
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
 
+    console.log("reqst",req.body);
     const { email, password } = req.body;
 
     // Find admin by email

@@ -7,6 +7,12 @@ const { body, validationResult } = require('express-validator');
 const fs = require('fs');
 const path = require('path');
 
+// Conditionally require cloudinary only if credentials are available
+let cloudinary = null;
+if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
+  cloudinary = require('cloudinary').v2;
+}
+
 // Public route - Check visa status (for user frontend)
 // This route should be before auth middleware
 router.post('/check-status', [
@@ -122,7 +128,14 @@ router.post('/with-document', upload.single('document'), [
     };
 
     if (req.file) {
-      applicationData.documentFilePath = req.file.path;
+      // Check if file is from Cloudinary (has secure_url) or local storage
+      if (req.file.secure_url || req.file.url) {
+        // Cloudinary file
+        applicationData.documentUrl = req.file.secure_url || req.file.url;
+      } else {
+        // Local file - store path in documentFilePath for backward compatibility
+        applicationData.documentFilePath = req.file.path;
+      }
     }
 
     const application = new Application(applicationData);
@@ -208,16 +221,65 @@ router.post('/:id/document', upload.single('document'), async (req, res) => {
     const application = await Application.findById(req.params.id);
     if (!application) {
       // Delete uploaded file if application not found
-      fs.unlinkSync(req.file.path);
+      if (req.file) {
+        try {
+          // If it's a Cloudinary file
+          if (req.file.secure_url || req.file.url) {
+            if (cloudinary) {
+              const fileUrl = req.file.secure_url || req.file.url;
+              const urlParts = fileUrl.split('/');
+              const publicIdWithExt = urlParts[urlParts.length - 1];
+              const publicId = publicIdWithExt.split('.')[0];
+              await cloudinary.uploader.destroy(`visa-applications/${publicId}`);
+            }
+          } else {
+            // Local file - delete from filesystem
+            if (fs.existsSync(req.file.path)) {
+              fs.unlinkSync(req.file.path);
+            }
+          }
+        } catch (err) {
+          console.error('Error deleting file:', err);
+        }
+      }
       return res.status(404).json({ error: 'Application not found' });
     }
 
     // Delete old file if exists
-    if (application.documentFilePath && fs.existsSync(application.documentFilePath)) {
-      fs.unlinkSync(application.documentFilePath);
+    if (application.documentUrl) {
+      try {
+        // Check if it's a Cloudinary URL
+        if (cloudinary && application.documentUrl.startsWith('http')) {
+          const urlParts = application.documentUrl.split('/');
+          const folderIndex = urlParts.findIndex(part => part === 'visa-applications');
+          if (folderIndex !== -1 && folderIndex < urlParts.length - 1) {
+            const publicIdWithExt = urlParts[urlParts.length - 1];
+            const publicId = publicIdWithExt.split('.')[0];
+            await cloudinary.uploader.destroy(`visa-applications/${publicId}`);
+          }
+        }
+      } catch (err) {
+        console.error('Error deleting old file:', err);
+      }
+    } else if (application.documentFilePath && fs.existsSync(application.documentFilePath)) {
+      // Delete local file
+      try {
+        fs.unlinkSync(application.documentFilePath);
+      } catch (err) {
+        console.error('Error deleting local file:', err);
+      }
     }
 
-    application.documentFilePath = req.file.path;
+    // Store new file URL or path
+    if (req.file.secure_url || req.file.url) {
+      // Cloudinary file
+      application.documentUrl = req.file.secure_url || req.file.url;
+      application.documentFilePath = null; // Clear old local path if exists
+    } else {
+      // Local file
+      application.documentFilePath = req.file.path;
+      application.documentUrl = null; // Clear old Cloudinary URL if exists
+    }
     await application.save();
 
     res.json(application);
@@ -235,8 +297,26 @@ router.delete('/:id', async (req, res) => {
     }
 
     // Delete associated file if exists
-    if (application.documentFilePath && fs.existsSync(application.documentFilePath)) {
-      fs.unlinkSync(application.documentFilePath);
+    if (application.documentUrl && cloudinary) {
+      try {
+        // Extract public_id from Cloudinary URL
+        const urlParts = application.documentUrl.split('/');
+        const folderIndex = urlParts.findIndex(part => part === 'visa-applications');
+        if (folderIndex !== -1 && folderIndex < urlParts.length - 1) {
+          const publicIdWithExt = urlParts[urlParts.length - 1];
+          const publicId = publicIdWithExt.split('.')[0];
+          await cloudinary.uploader.destroy(`visa-applications/${publicId}`);
+        }
+      } catch (err) {
+        console.error('Error deleting file from Cloudinary:', err);
+      }
+    } else if (application.documentFilePath && fs.existsSync(application.documentFilePath)) {
+      // Delete local file
+      try {
+        fs.unlinkSync(application.documentFilePath);
+      } catch (err) {
+        console.error('Error deleting local file:', err);
+      }
     }
 
     await Application.findByIdAndDelete(req.params.id);
@@ -254,11 +334,24 @@ router.get('/:id/document', async (req, res) => {
       return res.status(404).json({ error: 'Application not found' });
     }
 
-    if (!application.documentFilePath || !fs.existsSync(application.documentFilePath)) {
+    // Use documentUrl (Cloudinary) if available, otherwise fallback to documentFilePath (local)
+    const documentUrl = application.documentUrl || application.documentFilePath;
+    
+    if (!documentUrl) {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    res.download(application.documentFilePath);
+    // If it's a Cloudinary URL, redirect to it
+    if (documentUrl.startsWith('http://') || documentUrl.startsWith('https://')) {
+      return res.redirect(documentUrl);
+    }
+
+    // Fallback for local files (backward compatibility)
+    if (fs.existsSync(documentUrl)) {
+      return res.download(documentUrl);
+    }
+
+    return res.status(404).json({ error: 'Document not found' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
