@@ -96,9 +96,50 @@ router.get('/:id/document', async (req, res) => {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    // If it's a Cloudinary URL (starts with http/https), redirect to it
+    // If it's a Cloudinary URL (starts with http/https), fetch it server-side and stream to client
     if (documentUrl.startsWith('http://') || documentUrl.startsWith('https://')) {
-      return res.redirect(documentUrl);
+      try {
+        const https = require('https');
+        const http = require('http');
+        const url = require('url');
+        
+        const parsedUrl = new URL(documentUrl);
+        const client = documentUrl.startsWith('https://') ? https : http;
+        
+        // Fetch file from Cloudinary
+        const fileRequest = client.get(documentUrl, (fileResponse) => {
+          // Handle redirects
+          if (fileResponse.statusCode === 301 || fileResponse.statusCode === 302) {
+            const redirectUrl = fileResponse.headers.location;
+            if (redirectUrl) {
+              return res.redirect(redirectUrl);
+            }
+          }
+          
+          // Handle successful response
+          if (fileResponse.statusCode === 200) {
+            // Set appropriate headers
+            res.setHeader('Content-Type', fileResponse.headers['content-type'] || 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="visa-document-${application.applicationId}.pdf"`);
+            
+            // Stream the file to the client
+            fileResponse.pipe(res);
+          } else {
+            return res.status(fileResponse.statusCode).json({ error: 'Failed to fetch document from Cloudinary' });
+          }
+        });
+        
+        fileRequest.on('error', (error) => {
+          console.error('Error fetching from Cloudinary:', error);
+          return res.status(500).json({ error: 'Failed to fetch document' });
+        });
+        
+        fileRequest.end();
+      } catch (error) {
+        console.error('Error processing Cloudinary URL:', error);
+        return res.status(500).json({ error: 'Failed to process document URL' });
+      }
+      return; // Important: return early to prevent further execution
     }
 
     // Fallback for local files (backward compatibility)
