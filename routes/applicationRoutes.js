@@ -14,7 +14,7 @@ if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && proce
   cloudinary = require('cloudinary').v2;
 }
 
-// ==================== PUBLIC ROUTES (MUST BE FIRST) ====================
+// ==================== PUBLIC ROUTES ====================
 
 // Public route - Check visa status (for user frontend)
 router.post('/check-status', [
@@ -51,34 +51,45 @@ router.post('/check-status', [
 
     res.json(application);
   } catch (error) {
+    console.error('Check status error:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Public route - Download document (MUST BE BEFORE auth middleware and before /:id route)
+// Public route - Download document (NO AUTH REQUIRED)
 router.get('/:id/document', async (req, res) => {
   try {
+    console.log('Document download requested for ID:', req.params.id);
+    
     const application = await Application.findById(req.params.id);
     if (!application) {
+      console.log('Application not found');
       return res.status(404).json({ error: 'Application not found' });
     }
 
-    // Security: Verify application details if provided (optional for backward compatibility)
+    console.log('Application found:', {
+      id: application._id,
+      applicationId: application.applicationId,
+      hasDocumentFilePath: !!application.documentFilePath,
+      hasDocumentUrl: !!application.documentUrl
+    });
+
+    // Security: Verify application details if provided (optional)
     if (req.query.applicationId || req.query.passportNumber || req.query.dob || req.query.nationality) {
       const { applicationId, passportNumber, dob, nationality } = req.query;
-
+      
       if (applicationId && application.applicationId !== applicationId) {
         return res.status(403).json({ error: 'Invalid application details' });
       }
-
+      
       if (passportNumber && application.passportNumber !== passportNumber) {
         return res.status(403).json({ error: 'Invalid application details' });
       }
-
+      
       if (nationality && application.nationality !== nationality) {
         return res.status(403).json({ error: 'Invalid application details' });
       }
-
+      
       if (dob) {
         const dobDate = new Date(dob);
         const appDob = new Date(application.dob);
@@ -88,62 +99,74 @@ router.get('/:id/document', async (req, res) => {
       }
     }
 
-    // FIXED: Use documentFilePath first (which contains Cloudinary URL), then fallback to documentUrl
+    // Get document URL - prioritize documentFilePath (which has Cloudinary URL)
     let documentUrl = application.documentFilePath || application.documentUrl;
-
+    
+    console.log('Document URL:', documentUrl);
+    
     if (!documentUrl) {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    // If it's a Cloudinary URL (starts with http/https), fetch it server-side and stream to client
+    // If it's a Cloudinary URL, fetch and stream to client
     if (documentUrl.startsWith('http://') || documentUrl.startsWith('https://')) {
+      console.log('Fetching from Cloudinary:', documentUrl);
+      
       try {
         const https = require('https');
         const http = require('http');
-
+        
         const client = documentUrl.startsWith('https://') ? https : http;
-
+        
         // Fetch file from Cloudinary
         const fileRequest = client.get(documentUrl, (fileResponse) => {
+          console.log('Cloudinary response status:', fileResponse.statusCode);
+          
           // Handle redirects
           if (fileResponse.statusCode === 301 || fileResponse.statusCode === 302) {
             const redirectUrl = fileResponse.headers.location;
+            console.log('Redirect to:', redirectUrl);
             if (redirectUrl) {
               return res.redirect(redirectUrl);
             }
           }
-
+          
           // Handle successful response
           if (fileResponse.statusCode === 200) {
             // Set appropriate headers
-            res.setHeader('Content-Type', fileResponse.headers['content-type'] || 'application/pdf');
+            const contentType = fileResponse.headers['content-type'] || 'application/pdf';
+            res.setHeader('Content-Type', contentType);
             res.setHeader('Content-Disposition', `attachment; filename="visa-document-${application.applicationId}.pdf"`);
-
+            
+            console.log('Streaming file to client');
             // Stream the file to the client
             fileResponse.pipe(res);
           } else {
+            console.error('Bad response from Cloudinary:', fileResponse.statusCode);
             return res.status(fileResponse.statusCode).json({ error: 'Failed to fetch document from Cloudinary' });
           }
         });
-
+        
         fileRequest.on('error', (error) => {
           console.error('Error fetching from Cloudinary:', error);
           return res.status(500).json({ error: 'Failed to fetch document' });
         });
-
+        
         fileRequest.end();
       } catch (error) {
         console.error('Error processing Cloudinary URL:', error);
         return res.status(500).json({ error: 'Failed to process document URL' });
       }
-      return; // Important: return early to prevent further execution
+      return;
     }
 
-    // Fallback for local files (backward compatibility)
+    // Fallback for local files
     if (fs.existsSync(documentUrl)) {
+      console.log('Serving local file:', documentUrl);
       return res.download(documentUrl);
     }
 
+    console.error('Document file not found at path:', documentUrl);
     return res.status(404).json({ error: 'Document not found' });
   } catch (error) {
     console.error('Document download error:', error);
@@ -151,11 +174,10 @@ router.get('/:id/document', async (req, res) => {
   }
 });
 
-// ==================== PROTECTED ROUTES (REQUIRE AUTHENTICATION) ====================
-router.use(authMiddleware);
+// ==================== PROTECTED ROUTES (with individual auth) ====================
 
-// Get all applications
-router.get('/', async (req, res) => {
+// Get all applications - PROTECTED
+router.get('/', authMiddleware, async (req, res) => {
   try {
     const applications = await Application.find().sort({ createdAt: -1 });
     res.json(applications);
@@ -164,8 +186,8 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Get application by ID (MUST BE AFTER /document route)
-router.get('/:id', async (req, res) => {
+// Get application by ID - PROTECTED
+router.get('/:id', authMiddleware, async (req, res) => {
   try {
     const application = await Application.findById(req.params.id);
     if (!application) {
@@ -177,8 +199,8 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// Create new application
-router.post('/', [
+// Create new application - PROTECTED
+router.post('/', authMiddleware, [
   body('name').notEmpty().withMessage('Name is required'),
   body('applicationId').notEmpty().withMessage('Application ID is required'),
   body('passportNumber').notEmpty().withMessage('Passport Number is required'),
@@ -205,8 +227,8 @@ router.post('/', [
   }
 });
 
-// Create application with file upload
-router.post('/with-document', upload.single('document'), [
+// Create application with file upload - PROTECTED
+router.post('/with-document', authMiddleware, upload.single('document'), [
   body('name').notEmpty().withMessage('Name is required'),
   body('applicationId').notEmpty().withMessage('Application ID is required'),
   body('passportNumber').notEmpty().withMessage('Passport Number is required'),
@@ -226,9 +248,9 @@ router.post('/with-document', upload.single('document'), [
     };
 
     if (req.file) {
-      // Check if file is from Cloudinary (has secure_url) or local storage
+      // Check if file is from Cloudinary or local storage
       if (req.file.secure_url || req.file.url) {
-        // Cloudinary file - store in documentFilePath for consistency with existing data
+        // Cloudinary file
         applicationData.documentFilePath = req.file.secure_url || req.file.url;
         applicationData.documentUrl = null;
         console.log('✓ File uploaded to Cloudinary:', applicationData.documentFilePath);
@@ -245,16 +267,14 @@ router.post('/with-document', upload.single('document'), [
 
     res.status(201).json(application);
   } catch (error) {
-    // If file was uploaded but application creation failed, clean up the file
+    // Clean up uploaded file on error
     if (req.file) {
       try {
         if (req.file.secure_url || req.file.url) {
-          // Cloudinary file - delete from Cloudinary
           if (cloudinary && req.file.public_id) {
             await cloudinary.uploader.destroy(req.file.public_id);
           }
         } else if (req.file.path && fs.existsSync(req.file.path)) {
-          // Local file - delete it
           fs.unlinkSync(req.file.path);
         }
       } catch (cleanupError) {
@@ -270,7 +290,7 @@ router.post('/with-document', upload.single('document'), [
   }
 });
 
-// Error handler for multer upload errors
+// Error handler for multer
 router.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
@@ -284,8 +304,8 @@ router.use((err, req, res, next) => {
   next(err);
 });
 
-// Update application
-router.put('/:id', [
+// Update application - PROTECTED
+router.put('/:id', authMiddleware, [
   body('name').optional().notEmpty().withMessage('Name cannot be empty'),
   body('applicationId').optional().notEmpty().withMessage('Application ID cannot be empty'),
   body('passportNumber').optional().notEmpty().withMessage('Passport Number cannot be empty'),
@@ -319,8 +339,8 @@ router.put('/:id', [
   }
 });
 
-// Update application status
-router.patch('/:id/status', [
+// Update application status - PROTECTED
+router.patch('/:id/status', authMiddleware, [
   body('status').isIn(['Pending', 'In Process', 'Success', 'Rejected']).withMessage('Invalid status')
 ], async (req, res) => {
   try {
@@ -345,8 +365,8 @@ router.patch('/:id/status', [
   }
 });
 
-// Upload or replace document
-router.post('/:id/document', upload.single('document'), async (req, res) => {
+// Upload or replace document - PROTECTED
+router.post('/:id/document', authMiddleware, upload.single('document'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -390,7 +410,7 @@ router.post('/:id/document', upload.single('document'), async (req, res) => {
       }
     }
 
-    // Store new file URL or path in documentFilePath
+    // Store new file
     if (req.file.secure_url || req.file.url) {
       application.documentFilePath = req.file.secure_url || req.file.url;
     } else {
@@ -405,8 +425,8 @@ router.post('/:id/document', upload.single('document'), async (req, res) => {
   }
 });
 
-// Delete application
-router.delete('/:id', async (req, res) => {
+// Delete application - PROTECTED
+router.delete('/:id', authMiddleware, async (req, res) => {
   try {
     const application = await Application.findById(req.params.id);
     if (!application) {
