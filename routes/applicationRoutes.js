@@ -14,8 +14,9 @@ if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && proce
   cloudinary = require('cloudinary').v2;
 }
 
+// ==================== PUBLIC ROUTES (MUST BE FIRST) ====================
+
 // Public route - Check visa status (for user frontend)
-// This route should be before auth middleware
 router.post('/check-status', [
   body('applicationId').notEmpty().withMessage('Application ID is required'),
   body('passportNumber').notEmpty().withMessage('Passport Number is required'),
@@ -54,7 +55,7 @@ router.post('/check-status', [
   }
 });
 
-// Public route - Download document (with security validation)
+// Public route - Download document (MUST BE BEFORE auth middleware and before /:id route)
 router.get('/:id/document', async (req, res) => {
   try {
     const application = await Application.findById(req.params.id);
@@ -63,22 +64,21 @@ router.get('/:id/document', async (req, res) => {
     }
 
     // Security: Verify application details if provided (optional for backward compatibility)
-    // If verification params are provided, validate them
     if (req.query.applicationId || req.query.passportNumber || req.query.dob || req.query.nationality) {
       const { applicationId, passportNumber, dob, nationality } = req.query;
-      
+
       if (applicationId && application.applicationId !== applicationId) {
         return res.status(403).json({ error: 'Invalid application details' });
       }
-      
+
       if (passportNumber && application.passportNumber !== passportNumber) {
         return res.status(403).json({ error: 'Invalid application details' });
       }
-      
+
       if (nationality && application.nationality !== nationality) {
         return res.status(403).json({ error: 'Invalid application details' });
       }
-      
+
       if (dob) {
         const dobDate = new Date(dob);
         const appDob = new Date(application.dob);
@@ -88,10 +88,9 @@ router.get('/:id/document', async (req, res) => {
       }
     }
 
-    // Use documentUrl (Cloudinary) if available, otherwise fallback to documentFilePath
-    // documentFilePath might also contain Cloudinary URL (for backward compatibility)
-    let documentUrl = application.documentUrl || application.documentFilePath;
-    
+    // FIXED: Use documentFilePath first (which contains Cloudinary URL), then fallback to documentUrl
+    let documentUrl = application.documentFilePath || application.documentUrl;
+
     if (!documentUrl) {
       return res.status(404).json({ error: 'Document not found' });
     }
@@ -101,11 +100,9 @@ router.get('/:id/document', async (req, res) => {
       try {
         const https = require('https');
         const http = require('http');
-        const url = require('url');
-        
-        const parsedUrl = new URL(documentUrl);
+
         const client = documentUrl.startsWith('https://') ? https : http;
-        
+
         // Fetch file from Cloudinary
         const fileRequest = client.get(documentUrl, (fileResponse) => {
           // Handle redirects
@@ -115,25 +112,25 @@ router.get('/:id/document', async (req, res) => {
               return res.redirect(redirectUrl);
             }
           }
-          
+
           // Handle successful response
           if (fileResponse.statusCode === 200) {
             // Set appropriate headers
             res.setHeader('Content-Type', fileResponse.headers['content-type'] || 'application/pdf');
             res.setHeader('Content-Disposition', `attachment; filename="visa-document-${application.applicationId}.pdf"`);
-            
+
             // Stream the file to the client
             fileResponse.pipe(res);
           } else {
             return res.status(fileResponse.statusCode).json({ error: 'Failed to fetch document from Cloudinary' });
           }
         });
-        
+
         fileRequest.on('error', (error) => {
           console.error('Error fetching from Cloudinary:', error);
           return res.status(500).json({ error: 'Failed to fetch document' });
         });
-        
+
         fileRequest.end();
       } catch (error) {
         console.error('Error processing Cloudinary URL:', error);
@@ -149,11 +146,12 @@ router.get('/:id/document', async (req, res) => {
 
     return res.status(404).json({ error: 'Document not found' });
   } catch (error) {
+    console.error('Document download error:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Protected routes - require authentication
+// ==================== PROTECTED ROUTES (REQUIRE AUTHENTICATION) ====================
 router.use(authMiddleware);
 
 // Get all applications
@@ -166,7 +164,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Get application by ID
+// Get application by ID (MUST BE AFTER /document route)
 router.get('/:id', async (req, res) => {
   try {
     const application = await Application.findById(req.params.id);
@@ -230,12 +228,14 @@ router.post('/with-document', upload.single('document'), [
     if (req.file) {
       // Check if file is from Cloudinary (has secure_url) or local storage
       if (req.file.secure_url || req.file.url) {
-        // Cloudinary file
-        applicationData.documentUrl = req.file.secure_url || req.file.url;
-        console.log('✓ File uploaded to Cloudinary:', applicationData.documentUrl);
+        // Cloudinary file - store in documentFilePath for consistency with existing data
+        applicationData.documentFilePath = req.file.secure_url || req.file.url;
+        applicationData.documentUrl = null;
+        console.log('✓ File uploaded to Cloudinary:', applicationData.documentFilePath);
       } else {
-        // Local file - store path in documentFilePath for backward compatibility
+        // Local file
         applicationData.documentFilePath = req.file.path;
+        applicationData.documentUrl = null;
         console.log('✓ File saved locally:', applicationData.documentFilePath);
       }
     }
@@ -249,8 +249,10 @@ router.post('/with-document', upload.single('document'), [
     if (req.file) {
       try {
         if (req.file.secure_url || req.file.url) {
-          // Cloudinary file - would need to delete from Cloudinary
-          // This is handled in error cases if needed
+          // Cloudinary file - delete from Cloudinary
+          if (cloudinary && req.file.public_id) {
+            await cloudinary.uploader.destroy(req.file.public_id);
+          }
         } else if (req.file.path && fs.existsSync(req.file.path)) {
           // Local file - delete it
           fs.unlinkSync(req.file.path);
@@ -268,7 +270,7 @@ router.post('/with-document', upload.single('document'), [
   }
 });
 
-// Error handler for multer upload errors (must be after the route)
+// Error handler for multer upload errors
 router.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
@@ -355,20 +357,12 @@ router.post('/:id/document', upload.single('document'), async (req, res) => {
       // Delete uploaded file if application not found
       if (req.file) {
         try {
-          // If it's a Cloudinary file
           if (req.file.secure_url || req.file.url) {
-            if (cloudinary) {
-              const fileUrl = req.file.secure_url || req.file.url;
-              const urlParts = fileUrl.split('/');
-              const publicIdWithExt = urlParts[urlParts.length - 1];
-              const publicId = publicIdWithExt.split('.')[0];
-              await cloudinary.uploader.destroy(`visa-applications/${publicId}`);
+            if (cloudinary && req.file.public_id) {
+              await cloudinary.uploader.destroy(req.file.public_id);
             }
-          } else {
-            // Local file - delete from filesystem
-            if (fs.existsSync(req.file.path)) {
-              fs.unlinkSync(req.file.path);
-            }
+          } else if (req.file.path && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
           }
         } catch (err) {
           console.error('Error deleting file:', err);
@@ -378,40 +372,31 @@ router.post('/:id/document', upload.single('document'), async (req, res) => {
     }
 
     // Delete old file if exists
-    if (application.documentUrl) {
+    if (application.documentFilePath) {
       try {
-        // Check if it's a Cloudinary URL
-        if (cloudinary && application.documentUrl.startsWith('http')) {
-          const urlParts = application.documentUrl.split('/');
+        if (cloudinary && application.documentFilePath.startsWith('http')) {
+          const urlParts = application.documentFilePath.split('/');
           const folderIndex = urlParts.findIndex(part => part === 'visa-applications');
           if (folderIndex !== -1 && folderIndex < urlParts.length - 1) {
             const publicIdWithExt = urlParts[urlParts.length - 1];
             const publicId = publicIdWithExt.split('.')[0];
             await cloudinary.uploader.destroy(`visa-applications/${publicId}`);
           }
+        } else if (fs.existsSync(application.documentFilePath)) {
+          fs.unlinkSync(application.documentFilePath);
         }
       } catch (err) {
         console.error('Error deleting old file:', err);
       }
-    } else if (application.documentFilePath && fs.existsSync(application.documentFilePath)) {
-      // Delete local file
-      try {
-        fs.unlinkSync(application.documentFilePath);
-      } catch (err) {
-        console.error('Error deleting local file:', err);
-      }
     }
 
-    // Store new file URL or path
+    // Store new file URL or path in documentFilePath
     if (req.file.secure_url || req.file.url) {
-      // Cloudinary file
-      application.documentUrl = req.file.secure_url || req.file.url;
-      application.documentFilePath = null; // Clear old local path if exists
+      application.documentFilePath = req.file.secure_url || req.file.url;
     } else {
-      // Local file
       application.documentFilePath = req.file.path;
-      application.documentUrl = null; // Clear old Cloudinary URL if exists
     }
+    application.documentUrl = null;
     await application.save();
 
     res.json(application);
@@ -429,25 +414,21 @@ router.delete('/:id', async (req, res) => {
     }
 
     // Delete associated file if exists
-    if (application.documentUrl && cloudinary) {
+    if (application.documentFilePath) {
       try {
-        // Extract public_id from Cloudinary URL
-        const urlParts = application.documentUrl.split('/');
-        const folderIndex = urlParts.findIndex(part => part === 'visa-applications');
-        if (folderIndex !== -1 && folderIndex < urlParts.length - 1) {
-          const publicIdWithExt = urlParts[urlParts.length - 1];
-          const publicId = publicIdWithExt.split('.')[0];
-          await cloudinary.uploader.destroy(`visa-applications/${publicId}`);
+        if (cloudinary && application.documentFilePath.startsWith('http')) {
+          const urlParts = application.documentFilePath.split('/');
+          const folderIndex = urlParts.findIndex(part => part === 'visa-applications');
+          if (folderIndex !== -1 && folderIndex < urlParts.length - 1) {
+            const publicIdWithExt = urlParts[urlParts.length - 1];
+            const publicId = publicIdWithExt.split('.')[0];
+            await cloudinary.uploader.destroy(`visa-applications/${publicId}`);
+          }
+        } else if (fs.existsSync(application.documentFilePath)) {
+          fs.unlinkSync(application.documentFilePath);
         }
       } catch (err) {
-        console.error('Error deleting file from Cloudinary:', err);
-      }
-    } else if (application.documentFilePath && fs.existsSync(application.documentFilePath)) {
-      // Delete local file
-      try {
-        fs.unlinkSync(application.documentFilePath);
-      } catch (err) {
-        console.error('Error deleting local file:', err);
+        console.error('Error deleting file:', err);
       }
     }
 
@@ -459,4 +440,3 @@ router.delete('/:id', async (req, res) => {
 });
 
 module.exports = router;
-
