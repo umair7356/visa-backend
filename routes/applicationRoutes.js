@@ -6,7 +6,7 @@ const authMiddleware = require('../middleware/auth');
 const { body, validationResult } = require('express-validator');
 const fs = require('fs');
 const path = require('path');
-
+const axios = require('axios');
 // Public route - Check visa status (for user frontend)
 // This route should be before auth middleware
 router.post('/check-status', [
@@ -48,23 +48,29 @@ router.post('/check-status', [
 });
 
 
+
+
 router.get('/:id/document', async (req, res) => {
   try {
     const application = await Application.findById(req.params.id);
-    if (!application) {
-      console.log("fsafsafsa");
-      return res.status(404).json({ error: 'Application not found' });
+    if (!application || !application.documentUrl) {
+      return res.status(404).json({ error: 'Document not found' });
     }
 
-if (!application.documentUrl) {
-  return res.status(404).json({ error: 'Document not found' });
-}
-return res.redirect(application.documentUrl);
-    // res.download(application.documentFilePath);
+    const pdfStream = await axios.get(application.documentUrl, {
+      responseType: 'stream'
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="visa-document-${application.applicationId}.pdf"`);
+
+    pdfStream.data.pipe(res);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Failed to download PDF' });
   }
 });
+
 // Protected routes - require authentication
 router.use(authMiddleware);
 
@@ -301,6 +307,29 @@ router.delete('/:id', async (req, res) => {
 });
 
 // Download document
+
+
+router.get('/:id/document/preview', authMiddleware, async (req, res) => {
+  try {
+    const application = await Application.findById(req.params.id);
+    if (!application || !application.documentUrl) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    const pdfStream = await axios.get(application.documentUrl, {
+      responseType: "stream"
+    });
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", "inline");
+
+    pdfStream.data.pipe(res);
+
+  } catch (err) {
+    console.error("PDF Preview Error:", err.message);
+    res.status(500).json({ error: "Failed to preview PDF" });
+  }
+});
 
 
 module.exports = router;
