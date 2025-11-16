@@ -36,15 +36,10 @@ const applicationSchema = new mongoose.Schema({
     enum: ['Pending', 'In Process', 'Success', 'Rejected'],
     default: 'Pending'
   },
-  documentUrl: {
-    type: String,
-    default: null
-  },
-  // Keep documentFilePath for backward compatibility (deprecated)
-  documentFilePath: {
-    type: String,
-    default: null
-  },
+ documentFilePath: { type: String, default: null },
+  
+  // Add this for S3 uploaded PDF
+  documentUrl: { type: String, default: null },
   createdAt: {
     type: Date,
     default: Date.now

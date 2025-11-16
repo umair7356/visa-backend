@@ -1,62 +1,76 @@
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+// const multer = require('multer');
+// const path = require('path');
+// const fs = require('fs');
 
-const hasCloudinaryConfig = 
-  process.env.CLOUDINARY_CLOUD_NAME && 
-  process.env.CLOUDINARY_API_KEY && 
-  process.env.CLOUDINARY_API_SECRET;
+// // Ensure uploads directory exists
+// const uploadsDir = path.join(__dirname, '../uploads');
+// if (!fs.existsSync(uploadsDir)) {
+//   fs.mkdirSync(uploadsDir, { recursive: true });
+// }
 
-let storage;
+// // Configure multer storage
+// const storage = multer.diskStorage({
+//   destination: (req, file, cb) => {
+//     cb(null, uploadsDir);
+//   },
+//   filename: (req, file, cb) => {
+//     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+//     cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+//   }
+// });
 
-if (hasCloudinaryConfig) {
-  const cloudinary = require('cloudinary').v2;
-  const { CloudinaryStorage } = require('multer-storage-cloudinary');
+// // File filter
+// const fileFilter = (req, file, cb) => {
+//   // Accept PDF and common document formats
+//   const allowedTypes = /pdf|doc|docx/;
+//   const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+//   const mimetype = allowedTypes.test(file.mimetype);
 
-  cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET
-  });
+//   if (extname && mimetype) {
+//     return cb(null, true);
+//   } else {
+//     cb(new Error('Only PDF and DOC files are allowed'));
+//   }
+// };
 
-  storage = new CloudinaryStorage({
-    cloudinary,
-    params: async (req, file) => {
-      const ext = file.originalname.split('.').pop().toLowerCase();
-      if (!['pdf', 'doc', 'docx'].includes(ext)) {
-        throw new Error('Only PDF and DOC files are allowed');
-      }
-      return {
-        folder: 'visa-applications',
-        resource_type: 'raw',
-        format: ext
-      };
-    },
-  });
+// const upload = multer({
+//   storage: storage,
+//   limits: {
+//     fileSize: 10 * 1024 * 1024 // 10MB limit
+//   },
+//   fileFilter: fileFilter
+// });
 
-} else {
-  const uploadsDir = path.join(__dirname, '../uploads');
-  if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+// module.exports = upload;
 
-  storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, uploadsDir),
-    filename: (req, file, cb) => {
-      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-      cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-    }
-  });
-}
 
-const fileFilter = (req, file, cb) => {
-  const allowedTypes = /pdf|doc|docx/;
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = allowedTypes.test(file.mimetype);
-  if (extname && mimetype) cb(null, true);
-  else cb(new Error('Only PDF and DOC files are allowed'));
-};
 
-module.exports = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter
+const multer = require("multer");
+const multerS3 = require("multer-s3");
+const { S3Client } = require("@aws-sdk/client-s3");
+const path = require("path");
+
+// AWS S3 Client
+const s3 = new S3Client({
+  region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
 });
+
+// Multer S3 storage
+const upload = multer({
+  storage: multerS3({
+    s3: s3,
+    bucket: process.env.AWS_BUCKET_NAME,
+    key: (req, file, cb) => {
+      const ext = path.extname(file.originalname);
+      const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
+      cb(null, `applications/${unique}${ext}`); // Folder inside bucket
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+});
+
+module.exports = upload;
