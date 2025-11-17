@@ -14,6 +14,14 @@ const adminSchema = new mongoose.Schema({
     required: true,
     minlength: 6
   },
+  emailUpdated: {
+  type: Boolean,
+  default: false
+},
+name:{
+  type: String,
+  default:null
+},
   createdAt: {
     type: Date,
     default: Date.now
@@ -27,7 +35,7 @@ adminSchema.pre('save', async function(next) {
   }
   
   try {
-    const salt = await bcrypt.genSalt(10);
+    const salt = await bcrypt.genSalt(12);
     this.password = await bcrypt.hash(this.password, salt);
     next();
   } catch (error) {

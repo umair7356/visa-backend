@@ -1,132 +1,104 @@
-const express = require('express');
-const router = express.Router();
-const Application = require('../models/Application');
-const upload = require('../middleware/upload');
-const authMiddleware = require('../middleware/auth');
-const { body, validationResult } = require('express-validator');
-const fs = require('fs');
-const path = require('path');
-const axios = require('axios');
-// Public route - Check visa status (for user frontend)
-// This route should be before auth middleware
-router.post('/check-status', [
-  body('applicationId').notEmpty().withMessage('Application ID is required'),
-  body('passportNumber').notEmpty().withMessage('Passport Number is required'),
-  body('dob').notEmpty().withMessage('Date of Birth is required'),
-  body('nationality').notEmpty().withMessage('Nationality is required')
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+// const express = require('express');
+// const router = express.Router();
+// const Application = require('../models/Application');
+// const upload = require('../middleware/upload');
+// const authMiddleware = require('../middleware/auth');
+// const { body, validationResult } = require('express-validator');
+// const fs = require('fs');
+// const path = require('path');
+// const axios = require('axios');
+// // Public route - Check visa status (for user frontend)
+// // This route should be before auth middleware
+// router.post('/check-status', [
+//   body('applicationId').notEmpty().withMessage('Application ID is required'),
+//   body('passportNumber').notEmpty().withMessage('Passport Number is required'),
+//   body('dob').notEmpty().withMessage('Date of Birth is required'),
+//   body('nationality').notEmpty().withMessage('Nationality is required')
+// ], async (req, res) => {
+//   try {
+//     const errors = validationResult(req);
+//     if (!errors.isEmpty()) {
+//       return res.status(400).json({ errors: errors.array() });
+//     }
 
-    const { applicationId, passportNumber, dob, nationality } = req.body;
+//     const { applicationId, passportNumber, dob, nationality } = req.body;
 
-    // Convert dob to date and normalize for comparison
-    const dobDate = new Date(dob);
-    const startOfDay = new Date(dobDate);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(dobDate);
-    endOfDay.setHours(23, 59, 59, 999);
+//     // Convert dob to date and normalize for comparison
+//     const dobDate = new Date(dob);
+//     const startOfDay = new Date(dobDate);
+//     startOfDay.setHours(0, 0, 0, 0);
+//     const endOfDay = new Date(dobDate);
+//     endOfDay.setHours(23, 59, 59, 999);
 
-    const application = await Application.findOne({
-      applicationId: applicationId,
-      passportNumber: passportNumber,
-      nationality: nationality,
-      dob: { $gte: startOfDay, $lte: endOfDay }
-    });
+//     const application = await Application.findOne({
+//       applicationId: applicationId,
+//       passportNumber: passportNumber,
+//       nationality: nationality,
+//       dob: { $gte: startOfDay, $lte: endOfDay }
+//     });
 
-    if (!application) {
-      return res.status(404).json({ error: 'Application not found' });
-    }
+//     if (!application) {
+//       return res.status(404).json({ error: 'Application not found' });
+//     }
 
-    res.json(application);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-
+//     res.json(application);
+//   } catch (error) {
+//     res.status(500).json({ error: error.message });
+//   }
+// });
 
 
-router.get('/:id/document', async (req, res) => {
-  try {
-    const application = await Application.findById(req.params.id);
-    if (!application || !application.documentUrl) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
 
-    const pdfStream = await axios.get(application.documentUrl, {
-      responseType: 'stream'
-    });
 
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="visa-document-${application.applicationId}.pdf"`);
+// router.get('/:id/document', async (req, res) => {
+//   try {
+//     const application = await Application.findById(req.params.id);
+//     if (!application || !application.documentUrl) {
+//       return res.status(404).json({ error: 'Document not found' });
+//     }
 
-    pdfStream.data.pipe(res);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to download PDF' });
-  }
-});
+//     const pdfStream = await axios.get(application.documentUrl, {
+//       responseType: 'stream'
+//     });
 
-// Protected routes - require authentication
-router.use(authMiddleware);
+//     res.setHeader('Content-Type', 'application/pdf');
+//     res.setHeader('Content-Disposition', `attachment; filename="visa-document-${application.applicationId}.pdf"`);
 
-// Get all applications
-router.get('/', async (req, res) => {
-  try {
-    const applications = await Application.find().sort({ createdAt: -1 });
-    res.json(applications);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+//     pdfStream.data.pipe(res);
+//   } catch (error) {
+//     console.error(error);
+//     res.status(500).json({ error: 'Failed to download PDF' });
+//   }
+// });
 
-// Get application by ID
-router.get('/:id', async (req, res) => {
-  try {
-    const application = await Application.findById(req.params.id);
-    if (!application) {
-      return res.status(404).json({ error: 'Application not found' });
-    }
-    res.json(application);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+// // Protected routes - require authentication
+// router.use(authMiddleware);
 
-// Create new application
-router.post('/', [
-  body('name').notEmpty().withMessage('Name is required'),
-  body('applicationId').notEmpty().withMessage('Application ID is required'),
-  body('passportNumber').notEmpty().withMessage('Passport Number is required'),
-  body('nationality').notEmpty().withMessage('Nationality is required'),
-  body('dob').notEmpty().withMessage('Date of Birth is required'),
-  body('address').notEmpty().withMessage('Address is required')
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+// // Get all applications
+// router.get('/', async (req, res) => {
+//   try {
+//     const applications = await Application.find().sort({ createdAt: -1 });
+//     res.json(applications);
+//   } catch (error) {
+//     res.status(500).json({ error: error.message });
+//   }
+// });
 
-    const applicationData = req.body;
-    const application = new Application(applicationData);
-    await application.save();
+// // Get application by ID
+// router.get('/:id', async (req, res) => {
+//   try {
+//     const application = await Application.findById(req.params.id);
+//     if (!application) {
+//       return res.status(404).json({ error: 'Application not found' });
+//     }
+//     res.json(application);
+//   } catch (error) {
+//     res.status(500).json({ error: error.message });
+//   }
+// });
 
-    res.status(201).json(application);
-  } catch (error) {
-    if (error.code === 11000) {
-      return res.status(400).json({ error: 'Application ID already exists' });
-    }
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Create application with file upload
-// router.post('/with-document', upload.single('document'), [
+// // Create new application
+// router.post('/', [
 //   body('name').notEmpty().withMessage('Name is required'),
 //   body('applicationId').notEmpty().withMessage('Application ID is required'),
 //   body('passportNumber').notEmpty().withMessage('Passport Number is required'),
@@ -140,15 +112,7 @@ router.post('/', [
 //       return res.status(400).json({ errors: errors.array() });
 //     }
 
-//     const applicationData = {
-//       ...req.body,
-//       dob: new Date(req.body.dob)
-//     };
-
-//     if (req.file) {
-//       applicationData.documentFilePath = req.file.path;
-//     }
-
+//     const applicationData = req.body;
 //     const application = new Application(applicationData);
 //     await application.save();
 
@@ -160,41 +124,365 @@ router.post('/', [
 //     res.status(500).json({ error: error.message });
 //   }
 // });
-router.post('/with-document', upload.single('document'), [
-  body('name').notEmpty(),
-  body('applicationId').notEmpty(),
-  body('passportNumber').notEmpty(),
-  body('nationality').notEmpty(),
-  body('dob').notEmpty(),
-  body('address').notEmpty()
-], async (req, res) => {
+
+// // Create application with file upload
+// // router.post('/with-document', upload.single('document'), [
+// //   body('name').notEmpty().withMessage('Name is required'),
+// //   body('applicationId').notEmpty().withMessage('Application ID is required'),
+// //   body('passportNumber').notEmpty().withMessage('Passport Number is required'),
+// //   body('nationality').notEmpty().withMessage('Nationality is required'),
+// //   body('dob').notEmpty().withMessage('Date of Birth is required'),
+// //   body('address').notEmpty().withMessage('Address is required')
+// // ], async (req, res) => {
+// //   try {
+// //     const errors = validationResult(req);
+// //     if (!errors.isEmpty()) {
+// //       return res.status(400).json({ errors: errors.array() });
+// //     }
+
+// //     const applicationData = {
+// //       ...req.body,
+// //       dob: new Date(req.body.dob)
+// //     };
+
+// //     if (req.file) {
+// //       applicationData.documentFilePath = req.file.path;
+// //     }
+
+// //     const application = new Application(applicationData);
+// //     await application.save();
+
+// //     res.status(201).json(application);
+// //   } catch (error) {
+// //     if (error.code === 11000) {
+// //       return res.status(400).json({ error: 'Application ID already exists' });
+// //     }
+// //     res.status(500).json({ error: error.message });
+// //   }
+// // });
+// router.post('/with-document', upload.single('document'), [
+//   body('name').notEmpty(),
+//   body('applicationId').notEmpty(),
+//   body('passportNumber').notEmpty(),
+//   body('nationality').notEmpty(),
+//   body('dob').notEmpty(),
+//   body('address').notEmpty()
+// ], async (req, res) => {
+//   try {
+//     const errors = validationResult(req);
+//     if (!errors.isEmpty()) {
+//       return res.status(400).json({ errors: errors.array() });
+//     }
+
+//     const applicationData = {
+//       ...req.body,
+//       dob: new Date(req.body.dob)
+//     };
+
+//     // File from S3
+//     if (req.file) {
+//       applicationData.documentUrl = req.file.location;
+//     }
+
+//     const application = new Application(applicationData);
+//     await application.save();
+
+//     res.status(201).json(application);
+//   } catch (error) {
+//     res.status(500).json({ error: error.message });
+//   }
+// });
+
+
+// // Update application
+// router.put('/:id', [
+//   body('name').optional().notEmpty().withMessage('Name cannot be empty'),
+//   body('applicationId').optional().notEmpty().withMessage('Application ID cannot be empty'),
+//   body('passportNumber').optional().notEmpty().withMessage('Passport Number cannot be empty'),
+//   body('nationality').optional().notEmpty().withMessage('Nationality cannot be empty'),
+//   body('address').optional().notEmpty().withMessage('Address cannot be empty')
+// ], async (req, res) => {
+//   try {
+//     const errors = validationResult(req);
+//     if (!errors.isEmpty()) {
+//       return res.status(400).json({ errors: errors.array() });
+//     }
+
+//     const updateData = { ...req.body };
+//     if (updateData.dob) {
+//       updateData.dob = new Date(updateData.dob);
+//     }
+
+//     const application = await Application.findByIdAndUpdate(
+//       req.params.id,
+//       updateData,
+//       { new: true, runValidators: true }
+//     );
+
+//     if (!application) {
+//       return res.status(404).json({ error: 'Application not found' });
+//     }
+
+//     res.json(application);
+//   } catch (error) {
+//     res.status(500).json({ error: error.message });
+//   }
+// });
+
+// // Update application status
+// router.patch('/:id/status', [
+//   body('status').isIn(['Pending', 'In Process', 'Success', 'Rejected']).withMessage('Invalid status')
+// ], async (req, res) => {
+//   try {
+//     const errors = validationResult(req);
+//     if (!errors.isEmpty()) {
+//       return res.status(400).json({ errors: errors.array() });
+//     }
+
+//     const application = await Application.findByIdAndUpdate(
+//       req.params.id,
+//       { status: req.body.status },
+//       { new: true }
+//     );
+
+//     if (!application) {
+//       return res.status(404).json({ error: 'Application not found' });
+//     }
+
+//     res.json(application);
+//   } catch (error) {
+//     res.status(500).json({ error: error.message });
+//   }
+// });
+
+// // Upload or replace document
+// router.post('/:id/document', upload.single('document'), async (req, res) => {
+//   try {
+//     if (!req.file) {
+//       return res.status(400).json({ error: 'No file uploaded' });
+//     }
+
+//     const application = await Application.findById(req.params.id);
+//     if (!application) {
+//       return res.status(404).json({ error: 'Application not found' });
+//     }
+
+//     // Update documentUrl with S3 public URL
+//     application.documentUrl = req.file.location;
+
+//     // Optional: update timestamp
+//     application.updatedAt = new Date();
+
+//     await application.save();
+
+//     res.status(200).json({
+//       message: 'Document uploaded successfully',
+//       documentUrl: application.documentUrl,
+//       application
+//     });
+//   } catch (error) {
+//     console.error(error);
+//     res.status(500).json({ error: error.message });
+//   }
+// });
+
+// // Delete application
+// router.delete('/:id', async (req, res) => {
+//   try {
+//     const application = await Application.findById(req.params.id);
+//     if (!application) {
+//       return res.status(404).json({ error: 'Application not found' });
+//     }
+
+//     // Delete associated file if exists
+//     if (application.documentFilePath && fs.existsSync(application.documentFilePath)) {
+//       fs.unlinkSync(application.documentFilePath);
+//     }
+
+//     await Application.findByIdAndDelete(req.params.id);
+//     res.json({ message: 'Application deleted successfully' });
+//   } catch (error) {
+//     res.status(500).json({ error: error.message });
+//   }
+// });
+
+// // Download document
+
+
+// router.get('/:id/document/preview', authMiddleware, async (req, res) => {
+//   try {
+//     const application = await Application.findById(req.params.id);
+//     if (!application || !application.documentUrl) {
+//       return res.status(404).json({ error: 'Document not found' });
+//     }
+
+//     const pdfStream = await axios.get(application.documentUrl, {
+//       responseType: "stream"
+//     });
+
+//     res.setHeader("Content-Type", "application/pdf");
+//     res.setHeader("Content-Disposition", "inline");
+
+//     pdfStream.data.pipe(res);
+
+//   } catch (err) {
+//     console.error("PDF Preview Error:", err.message);
+//     res.status(500).json({ error: "Failed to preview PDF" });
+//   }
+// });
+
+
+// module.exports = router;
+
+
+const express = require("express");
+const router = express.Router();
+const Application = require("../models/Application");
+const { uploadMemory, uploadToSupabase } = require("../middleware/upload");
+const authMiddleware = require("../middleware/auth");
+const { body, validationResult } = require("express-validator");
+const axios = require("axios");
+
+// -------------------------
+// PUBLIC ROUTE - CHECK STATUS
+// -------------------------
+router.post(
+  "/check-status",
+  [
+    body("applicationId").notEmpty(),
+    body("passportNumber").notEmpty(),
+    body("dob").notEmpty(),
+    body("nationality").notEmpty(),
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
+
+      const { applicationId, passportNumber, dob, nationality } = req.body;
+
+      const dobDate = new Date(dob);
+      const startOfDay = new Date(dobDate);
+      startOfDay.setHours(0, 0, 0, 0);
+
+      const endOfDay = new Date(dobDate);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const application = await Application.findOne({
+        applicationId,
+        passportNumber,
+        nationality,
+        dob: { $gte: startOfDay, $lte: endOfDay },
+      });
+
+      if (!application) {
+        return res.status(404).json({ error: "Application not found" });
+      }
+
+      res.json(application);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+
+
+
+
+// -------------------------
+// DOWNLOAD PDF PUBLIC
+// -------------------------
+router.get("/:id/document", async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+    const application = await Application.findById(req.params.id);
+    if (!application || !application.documentUrl) {
+      return res.status(404).json({ error: "Document not found" });
     }
 
-    const applicationData = {
-      ...req.body,
-      dob: new Date(req.body.dob)
-    };
+    const pdfStream = await axios.get(application.documentUrl, {
+      responseType: "stream",
+    });
 
-    // File from S3
-    if (req.file) {
-      applicationData.documentUrl = req.file.location;
-    }
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="visa-document-${application.applicationId}.pdf"`
+    );
 
-    const application = new Application(applicationData);
-    await application.save();
+    pdfStream.data.pipe(res);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to download PDF" });
+  }
+});
 
-    res.status(201).json(application);
+// -------------------------
+// PROTECTED ROUTES
+// -------------------------
+router.use(authMiddleware);
+
+// GET ALL APPLICATIONS
+router.get("/", async (req, res) => {
+  try {
+    const applications = await Application.find().sort({ createdAt: -1 });
+    res.json(applications);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
+// GET SINGLE APPLICATION
+router.get("/:id", async (req, res) => {
+  try {
+    const application = await Application.findById(req.params.id);
+    if (!application) {
+      return res.status(404).json({ error: "Application not found" });
+    }
+    res.json(application);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
-// Update application
+// -------------------------
+// CREATE NEW APPLICATION (NO FILE)
+// -------------------------
+router.post(
+  "/",
+  [
+    body("name").notEmpty(),
+    body("applicationId").notEmpty(),
+    body("passportNumber").notEmpty(),
+    body("nationality").notEmpty(),
+    body("dob").notEmpty(),
+    body("address").notEmpty(),
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
+
+      const application = new Application({
+        ...req.body,
+        dob: new Date(req.body.dob),
+      });
+
+      await application.save();
+      res.status(201).json(application);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+// -------------------------
+// Update APPLICATION
+// -------------------------
+
 router.put('/:id', [
   body('name').optional().notEmpty().withMessage('Name cannot be empty'),
   body('applicationId').optional().notEmpty().withMessage('Application ID cannot be empty'),
@@ -229,7 +517,38 @@ router.put('/:id', [
   }
 });
 
-// Update application status
+// -------------------------
+// CREATE APPLICATION WITH DOCUMENT
+// -------------------------
+router.post(
+  "/with-document",
+  uploadMemory.single("document"),
+  uploadToSupabase,
+  async (req, res) => {
+    try {
+      const applicationData = {
+        ...req.body,
+        dob: new Date(req.body.dob),
+      };
+
+      if (req.file?.publicUrl) {
+        applicationData.documentUrl = req.file.publicUrl;
+      }
+
+      const application = new Application(applicationData);
+      await application.save();
+
+      res.status(201).json(application);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+// -------------------------
+// UPLOAD STATUS OF APPLICATION
+// -------------------------
+
 router.patch('/:id/status', [
   body('status').isIn(['Pending', 'In Process', 'Success', 'Rejected']).withMessage('Invalid status')
 ], async (req, res) => {
@@ -255,38 +574,67 @@ router.patch('/:id/status', [
   }
 });
 
-// Upload or replace document
-router.post('/:id/document', upload.single('document'), async (req, res) => {
+// -------------------------
+// UPLOAD / REPLACE DOCUMENT
+// -------------------------
+router.post(
+  "/:id/document",
+  uploadMemory.single("document"),
+  uploadToSupabase,
+  async (req, res) => {
+    try {
+      const application = await Application.findById(req.params.id);
+      if (!application) {
+        return res.status(404).json({ error: "Application not found" });
+      }
+
+      if (!req.file?.publicUrl) {
+        return res.status(400).json({ error: "File upload failed" });
+      }
+
+      application.documentUrl = req.file.publicUrl;
+      application.updatedAt = new Date();
+
+      await application.save();
+
+      res.json({
+        message: "Document uploaded successfully",
+        documentUrl: application.documentUrl,
+      });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+// -------------------------
+// PREVIEW PDF (INLINE)
+// -------------------------
+router.get("/:id/document/preview", async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
-
     const application = await Application.findById(req.params.id);
-    if (!application) {
-      return res.status(404).json({ error: 'Application not found' });
+    if (!application || !application.documentUrl) {
+      return res.status(404).json({ error: "Document not found" });
     }
 
-    // Update documentUrl with S3 public URL
-    application.documentUrl = req.file.location;
-
-    // Optional: update timestamp
-    application.updatedAt = new Date();
-
-    await application.save();
-
-    res.status(200).json({
-      message: 'Document uploaded successfully',
-      documentUrl: application.documentUrl,
-      application
+    const pdfStream = await axios.get(application.documentUrl, {
+      responseType: "stream",
     });
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", "inline");
+
+    pdfStream.data.pipe(res);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: "Failed to preview PDF" });
   }
 });
 
-// Delete application
+
+// -------------------------
+// Delete Application
+// -------------------------
+
 router.delete('/:id', async (req, res) => {
   try {
     const application = await Application.findById(req.params.id);
@@ -306,31 +654,4 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-// Download document
-
-
-router.get('/:id/document/preview', authMiddleware, async (req, res) => {
-  try {
-    const application = await Application.findById(req.params.id);
-    if (!application || !application.documentUrl) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-
-    const pdfStream = await axios.get(application.documentUrl, {
-      responseType: "stream"
-    });
-
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", "inline");
-
-    pdfStream.data.pipe(res);
-
-  } catch (err) {
-    console.error("PDF Preview Error:", err.message);
-    res.status(500).json({ error: "Failed to preview PDF" });
-  }
-});
-
-
 module.exports = router;
-
