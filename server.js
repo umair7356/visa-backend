@@ -8,7 +8,7 @@ const connectDB = require('./config/db');
 const app = express();
 
 // Connect to MongoDB
-connectDB();
+await connectDB();
 
 // Allowed frontend origins
 const allowedOrigins = [
