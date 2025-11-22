@@ -8,7 +8,7 @@ const connectDB = require('./config/db');
 const app = express();
 
 // Connect to MongoDB
-await connectDB();
+
 
 // Allowed frontend origins
 const allowedOrigins = [
@@ -47,12 +47,22 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'Server is running' });
 });
 
-// Local dev server
-if (process.env.NODE_ENV !== "production") {
-  const PORT = process.env.PORT || 5000;
-  app.listen(PORT, () => {
-    console.log(`Local server running on port ${PORT}`);
-  });
-}
+const startServer = async () => {
+  try {
+    await connectDB(); // Connect to MongoDB
+
+    // Only start local server in dev
+    if (process.env.NODE_ENV !== "production") {
+      const PORT = process.env.PORT || 5000;
+      app.listen(PORT, () => {
+        console.log(`Local server running on port ${PORT}`);
+      });
+    }
+  } catch (err) {
+    console.error("Failed to connect to DB", err);
+  }
+};
+
+startServer();
 
 module.exports = app;
